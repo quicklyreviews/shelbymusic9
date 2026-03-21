@@ -26,25 +26,24 @@ import time
 # ============================================================
 ace_image = (
     modal.Image.debian_slim(python_version="3.11")
-    .apt_install(["ffmpeg", "libsndfile1", "git"])  # git required to clone ACE-Step
+    .apt_install(["ffmpeg", "libsndfile1", "git"])
     .pip_install([
         "torch==2.2.0",
         "torchaudio==2.2.0",
-        # ACE-Step dependencies
         "transformers>=4.40.0",
-        "diffusers>=0.27.0",
+        "diffusers>=0.32.0",   # ACE-Step pipeline added in 0.32+
         "accelerate>=0.28.0",
         "soundfile>=0.12.1",
         "pydub>=0.25.1",
-        # Storage / HTTP
+        "numpy>=1.24.0",
         "boto3>=1.34.0",
         "requests>=2.31.0",
         "fastapi[standard]>=0.100.0",
+        "huggingface_hub>=0.24.0",
     ])
     .run_commands(
-        # Install ACE-Step from the official repo
-        "pip install 'acestep @ git+https://github.com/ace-step/ACE-Step.git' --no-deps || "
-        "pip install git+https://github.com/ace-step/ACE-Step.git"
+        # Install ACE-Step package (provides model weights + config, diffusers handles inference)
+        "pip install git+https://github.com/ace-step/ACE-Step.git || echo 'ACE-Step git install failed, continuing'"
     )
 )
 
@@ -70,33 +69,53 @@ class ACEStepGenerator:
     def load_model(self):
         """Load ACE-Step 1.5 model into GPU memory on container start."""
         import torch
+        import importlib
+        import pkgutil
 
         print("[ACEStep] Loading model...")
         start = time.time()
 
+        # Diagnostic: print installed acestep submodules so we can see the layout
         try:
-            from acestep.pipeline import ACEStepPipeline
+            import acestep
+            subs = [m.name for m in pkgutil.iter_modules(acestep.__path__)]
+            exports = [x for x in dir(acestep) if not x.startswith("_")]
+            print(f"[ACEStep] acestep submodules: {subs}")
+            print(f"[ACEStep] acestep exports: {exports}")
+        except Exception as e:
+            print(f"[ACEStep] acestep inspection: {e}")
 
-            self.pipe = ACEStepPipeline.from_pretrained(
-                "ACE-Step/ACE-Step-v1.5-3.5B",
-                torch_dtype=torch.bfloat16,
-                cache_dir="/model-cache",
-            )
-            self.pipe.to("cuda")
+        # Try import paths in order of most-likely-correct
+        pipeline_cls = None
+        attempts = [
+            ("diffusers", "ACEStepPipeline"),           # diffusers >= 0.32 native support
+            ("acestep", "ACEStepPipeline"),             # direct top-level export
+            ("acestep.pipeline", "ACEStepPipeline"),    # old path (fails currently)
+            ("acestep.ace_step_pipeline", "ACEStepPipeline"),
+            ("acestep.pipelines.ace_step_pipeline", "ACEStepPipeline"),
+        ]
+        for mod_path, cls_name in attempts:
+            try:
+                mod = importlib.import_module(mod_path)
+                pipeline_cls = getattr(mod, cls_name)
+                print(f"[ACEStep] Imported {cls_name} from {mod_path}")
+                break
+            except (ImportError, AttributeError) as e:
+                print(f"[ACEStep] {mod_path}.{cls_name} → {e}")
 
-            # CPU offload reduces peak VRAM ~30% on T4 (16GB)
-            # Slightly slower inference but fits comfortably
-            if hasattr(self.pipe, "enable_model_cpu_offload"):
-                self.pipe.enable_model_cpu_offload()
+        if pipeline_cls is None:
+            raise ImportError("Could not import ACEStepPipeline from any known location")
 
-        except ImportError:
-            # Fallback: try alternate import path
-            from ACEStep.pipeline import ACEStepPipeline  # type: ignore
-            self.pipe = ACEStepPipeline.from_pretrained(
-                "ACE-Step/ACE-Step-v1.5-3.5B",
-                torch_dtype=torch.bfloat16,
-                cache_dir="/model-cache",
-            )
+        self.pipe = pipeline_cls.from_pretrained(
+            "ACE-Step/ACE-Step-v1.5-3.5B",
+            torch_dtype=torch.bfloat16,
+            cache_dir="/model-cache",
+        )
+
+        # CPU offload reduces peak VRAM ~30% on T4 (16GB)
+        if hasattr(self.pipe, "enable_model_cpu_offload"):
+            self.pipe.enable_model_cpu_offload()
+        else:
             self.pipe.to("cuda")
 
         elapsed = time.time() - start
