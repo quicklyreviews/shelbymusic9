@@ -30,19 +30,18 @@ ace_image = (
     .pip_install([
         "torch==2.2.0",
         "torchaudio==2.2.0",
-        "transformers>=4.40.0",
-        "diffusers>=0.27.0,<0.32.0",  # 0.32+ needs torch>=2.4 for xpu; 0.27-0.31 fine with 2.2
-        "accelerate>=0.28.0",
-        "soundfile>=0.12.1",
-        "pydub>=0.25.1",
-        "numpy<2",               # ace-step compiled for numpy 1.x, numpy 2.x breaks it
         "boto3>=1.34.0",
         "requests>=2.31.0",
         "fastapi[standard]>=0.100.0",
-        "huggingface_hub>=0.24.0",
     ])
     .run_commands(
-        "pip install git+https://github.com/ace-step/ACE-Step.git || echo 'Warning: ace-step install failed'"
+        # ace-step pulls many deps (gradio, spacy, etc.) — install separately
+        # so Modal can cache the base image (torch) independently
+        "pip install git+https://github.com/ace-step/ACE-Step.git || echo 'Warning: ace-step install failed'",
+        # Force numpy<2 AFTER ace-step — the base image has numpy 2.4.3 which
+        # breaks torch 2.2 (compiled with numpy 1.x C ABI).
+        # --no-deps prevents pip from re-upgrading numpy via other packages.
+        "pip install 'numpy==1.26.4' --force-reinstall --no-deps",
     )
 )
 
