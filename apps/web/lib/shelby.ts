@@ -63,7 +63,7 @@ export async function uploadToShelby(
   const expirationDays = parseInt(process.env.SHELBY_EXPIRATION_DAYS || '30', 10)
 
   // Expiration in microseconds (Shelby uses micros)
-  const expirationMicros = BigInt(Date.now() + expirationDays * 24 * 60 * 60 * 1000) * 1000n
+  const expirationMicros = BigInt(Date.now() + expirationDays * 24 * 60 * 60 * 1000) * BigInt(1000)
 
   await client.upload({
     signer,
