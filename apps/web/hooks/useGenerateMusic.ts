@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { submitGeneration, pollStatus } from '@/lib/api'
 import type { GenerateRequest, JobStatus } from '@/types'
 
-const TIMEOUT_MS = 5 * 60 * 1000
+const TIMEOUT_MS = 10 * 60 * 1000 // 10 min: matches Modal timeout
 
 export interface UseGenerateMusicReturn {
   generate: (input: GenerateRequest) => Promise<void>

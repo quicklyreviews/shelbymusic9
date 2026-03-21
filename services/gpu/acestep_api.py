@@ -60,7 +60,7 @@ app = modal.App("phonezoo-acestep")
     secrets=[modal.Secret.from_name("phonezoo-secrets")],
     volumes={"/model-cache": model_volume},
     scaledown_window=120,  # Keep warm for 2 min after last request
-    timeout=300,                 # Max 5 min per generation
+    timeout=600,          # 10 min: allows cold start model download (~7GB) + generation
 )
 class ACEStepGenerator:
 

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getJobStatus, markJobFailed } from '@/lib/storage'
 
-const STALE_JOB_TIMEOUT_MS = 5 * 60 * 1000
+const STALE_JOB_TIMEOUT_MS = 10 * 60 * 1000 // 10 min: matches Modal timeout
 
 export async function GET(
   _req: NextRequest,
