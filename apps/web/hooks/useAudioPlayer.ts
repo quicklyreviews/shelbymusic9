@@ -7,6 +7,9 @@ export function useAudioPlayer(src: string) {
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
+  const [volume, setVolume] = useState(1)
+  const [muted, setMuted] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
     const audio = audioRef.current
@@ -17,6 +20,8 @@ export function useAudioPlayer(src: string) {
     const onEnded = () => setIsPlaying(false)
     const onPlay = () => setIsPlaying(true)
     const onPause = () => setIsPlaying(false)
+    const onCanPlay = () => setIsLoading(false)
+    const onWaiting = () => setIsLoading(true)
 
     audio.addEventListener('timeupdate', onTimeUpdate)
     audio.addEventListener('durationchange', onDurationChange)
@@ -24,6 +29,8 @@ export function useAudioPlayer(src: string) {
     audio.addEventListener('ended', onEnded)
     audio.addEventListener('play', onPlay)
     audio.addEventListener('pause', onPause)
+    audio.addEventListener('canplay', onCanPlay)
+    audio.addEventListener('waiting', onWaiting)
 
     return () => {
       audio.removeEventListener('timeupdate', onTimeUpdate)
@@ -32,17 +39,16 @@ export function useAudioPlayer(src: string) {
       audio.removeEventListener('ended', onEnded)
       audio.removeEventListener('play', onPlay)
       audio.removeEventListener('pause', onPause)
+      audio.removeEventListener('canplay', onCanPlay)
+      audio.removeEventListener('waiting', onWaiting)
     }
   }, [src])
 
   const toggle = () => {
     const audio = audioRef.current
     if (!audio) return
-    if (isPlaying) {
-      audio.pause()
-    } else {
-      audio.play().catch(() => {})
-    }
+    if (isPlaying) audio.pause()
+    else audio.play().catch(() => {})
   }
 
   const seek = (fraction: number) => {
@@ -51,5 +57,24 @@ export function useAudioPlayer(src: string) {
     audio.currentTime = Math.max(0, Math.min(1, fraction)) * duration
   }
 
-  return { audioRef, isPlaying, currentTime, duration, toggle, seek }
+  const changeVolume = (v: number) => {
+    const audio = audioRef.current
+    const clamped = Math.max(0, Math.min(1, v))
+    if (audio) {
+      audio.volume = clamped
+      audio.muted = clamped === 0
+    }
+    setVolume(clamped)
+    setMuted(clamped === 0)
+  }
+
+  const toggleMute = () => {
+    const audio = audioRef.current
+    if (!audio) return
+    const next = !muted
+    audio.muted = next
+    setMuted(next)
+  }
+
+  return { audioRef, isPlaying, currentTime, duration, volume, muted, isLoading, toggle, seek, changeVolume, toggleMute }
 }

@@ -5,6 +5,8 @@ import { RingtoneCard } from '@/components/RingtoneCard'
 import { Wand2 } from 'lucide-react'
 import type { Genre, Ringtone } from '@/types'
 
+export const revalidate = 60 // ISR: refresh every 60s
+
 export const metadata: Metadata = {
   title: 'Ringtone Library',
   description: 'Browse AI-generated ringtones created by the community. Play, download, or get inspired for your own creation.',

@@ -1,11 +1,10 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { submitGeneration, pollStatus } from '@/lib/api'
 import type { GenerateRequest, JobStatus } from '@/types'
 
-const POLL_INTERVAL_MS = 2000
-const TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
+const TIMEOUT_MS = 5 * 60 * 1000
 
 export interface UseGenerateMusicReturn {
   generate: (input: GenerateRequest) => Promise<void>
@@ -29,9 +28,11 @@ export function useGenerateMusic(): UseGenerateMusicReturn {
   const pollRef = useRef<NodeJS.Timeout | null>(null)
   const elapsedRef = useRef<NodeJS.Timeout | null>(null)
   const startTimeRef = useRef<number>(0)
+  const activeRef = useRef(false)
 
   const stopPolling = () => {
-    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
+    activeRef.current = false
+    if (pollRef.current) { clearTimeout(pollRef.current); pollRef.current = null }
     if (elapsedRef.current) { clearInterval(elapsedRef.current); elapsedRef.current = null }
   }
 
@@ -45,23 +46,15 @@ export function useGenerateMusic(): UseGenerateMusicReturn {
     setElapsedMs(0)
   }
 
-  // Start polling when jobId is set and not yet terminal
-  useEffect(() => {
-    if (!jobId || status === 'completed' || status === 'failed') {
-      stopPolling()
-      return
-    }
+  // Adaptive polling: 2s for first 30s, 5s after — saves ~18 req/min during slow GPU generation
+  const schedulePoll = useCallback((id: string) => {
+    if (!activeRef.current) return
+    const elapsed = Date.now() - startTimeRef.current
+    const interval = elapsed > 30_000 ? 5000 : 2000
 
-    startTimeRef.current = Date.now()
+    pollRef.current = setTimeout(async () => {
+      if (!activeRef.current) return
 
-    // Elapsed time counter (updates every second for UX)
-    elapsedRef.current = setInterval(() => {
-      setElapsedMs(Date.now() - startTimeRef.current)
-    }, 1000)
-
-    // Status polling every 2 seconds
-    pollRef.current = setInterval(async () => {
-      // Timeout guard
       if (Date.now() - startTimeRef.current > TIMEOUT_MS) {
         stopPolling()
         setStatus('failed')
@@ -70,7 +63,8 @@ export function useGenerateMusic(): UseGenerateMusicReturn {
       }
 
       try {
-        const result = await pollStatus(jobId)
+        const result = await pollStatus(id)
+        if (!activeRef.current) return
         setStatus(result.status)
 
         if (result.status === 'completed') {
@@ -79,26 +73,40 @@ export function useGenerateMusic(): UseGenerateMusicReturn {
         } else if (result.status === 'failed') {
           setError(result.error || 'Generation failed. Please try again.')
           stopPolling()
+        } else {
+          schedulePoll(id)
         }
-      } catch (err) {
-        console.error('Poll error:', err)
-        // Don't stop polling on transient network errors
+      } catch {
+        if (activeRef.current) schedulePoll(id) // retry on transient network error
       }
-    }, POLL_INTERVAL_MS)
+    }, interval)
+  }, [])
 
+  useEffect(() => {
+    if (!jobId) return
+
+    activeRef.current = true
+    startTimeRef.current = Date.now()
+
+    // 250ms tick for smooth progress bar animation
+    elapsedRef.current = setInterval(() => {
+      setElapsedMs(Date.now() - startTimeRef.current)
+    }, 250)
+
+    schedulePoll(jobId)
     return stopPolling
-  }, [jobId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [jobId, schedulePoll])
 
   const generate = async (input: GenerateRequest) => {
     reset()
     setIsSubmitting(true)
-
     try {
       const response = await submitGeneration(input)
       setJobId(response.job_id)
       setStatus('processing')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to start generation')
+      setStatus('failed')
     } finally {
       setIsSubmitting(false)
     }
