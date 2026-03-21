@@ -31,19 +31,18 @@ ace_image = (
         "torch==2.2.0",
         "torchaudio==2.2.0",
         "transformers>=4.40.0",
-        "diffusers>=0.32.0",   # ACE-Step pipeline added in 0.32+
+        "diffusers>=0.27.0,<0.32.0",  # 0.32+ needs torch>=2.4 for xpu; 0.27-0.31 fine with 2.2
         "accelerate>=0.28.0",
         "soundfile>=0.12.1",
         "pydub>=0.25.1",
-        "numpy>=1.24.0",
+        "numpy<2",               # ace-step compiled for numpy 1.x, numpy 2.x breaks it
         "boto3>=1.34.0",
         "requests>=2.31.0",
         "fastapi[standard]>=0.100.0",
         "huggingface_hub>=0.24.0",
     ])
     .run_commands(
-        # Install ACE-Step package (provides model weights + config, diffusers handles inference)
-        "pip install git+https://github.com/ace-step/ACE-Step.git || echo 'ACE-Step git install failed, continuing'"
+        "pip install git+https://github.com/ace-step/ACE-Step.git || echo 'Warning: ace-step install failed'"
     )
 )
 
@@ -67,56 +66,23 @@ class ACEStepGenerator:
 
     @modal.enter()
     def load_model(self):
-        """Load ACE-Step 1.5 model into GPU memory on container start."""
+        """Load ACE-Step model into GPU memory on container start."""
         import torch
-        import importlib
-        import pkgutil
 
         print("[ACEStep] Loading model...")
         start = time.time()
 
-        # Diagnostic: print installed acestep submodules so we can see the layout
-        try:
-            import acestep
-            subs = [m.name for m in pkgutil.iter_modules(acestep.__path__)]
-            exports = [x for x in dir(acestep) if not x.startswith("_")]
-            print(f"[ACEStep] acestep submodules: {subs}")
-            print(f"[ACEStep] acestep exports: {exports}")
-        except Exception as e:
-            print(f"[ACEStep] acestep inspection: {e}")
+        # Correct import path (confirmed from Modal logs: submodule = pipeline_ace_step)
+        from acestep.pipeline_ace_step import ACEStepPipeline
 
-        # Try import paths in order of most-likely-correct
-        pipeline_cls = None
-        attempts = [
-            ("diffusers", "ACEStepPipeline"),           # diffusers >= 0.32 native support
-            ("acestep", "ACEStepPipeline"),             # direct top-level export
-            ("acestep.pipeline", "ACEStepPipeline"),    # old path (fails currently)
-            ("acestep.ace_step_pipeline", "ACEStepPipeline"),
-            ("acestep.pipelines.ace_step_pipeline", "ACEStepPipeline"),
-        ]
-        for mod_path, cls_name in attempts:
-            try:
-                mod = importlib.import_module(mod_path)
-                pipeline_cls = getattr(mod, cls_name)
-                print(f"[ACEStep] Imported {cls_name} from {mod_path}")
-                break
-            except (ImportError, AttributeError) as e:
-                print(f"[ACEStep] {mod_path}.{cls_name} → {e}")
-
-        if pipeline_cls is None:
-            raise ImportError("Could not import ACEStepPipeline from any known location")
-
-        self.pipe = pipeline_cls.from_pretrained(
+        # float16 is faster than bfloat16 on T4 and numerically equivalent for inference
+        self.pipe = ACEStepPipeline.from_pretrained(
             "ACE-Step/ACE-Step-v1.5-3.5B",
-            torch_dtype=torch.bfloat16,
+            torch_dtype=torch.float16,
             cache_dir="/model-cache",
         )
-
-        # CPU offload reduces peak VRAM ~30% on T4 (16GB)
-        if hasattr(self.pipe, "enable_model_cpu_offload"):
-            self.pipe.enable_model_cpu_offload()
-        else:
-            self.pipe.to("cuda")
+        # Keep everything on GPU — T4 has 16GB, no need for cpu_offload (which adds latency)
+        self.pipe.to("cuda")
 
         elapsed = time.time() - start
         print(f"[ACEStep] Model loaded in {elapsed:.1f}s")
@@ -147,15 +113,13 @@ class ACEStepGenerator:
 
             # Run ACE-Step inference
             with torch.inference_mode():
-                # ACE-Step API: adjust parameter names as per official docs
                 result = self.pipe(
                     prompt=prompt,
-                    lyrics=lyrics if lyrics else None,
+                    lyrics=lyrics if lyrics else "",
                     duration=duration,
                     seed=seed,
-                    # T4 optimizations
                     guidance_scale=7.0,
-                    num_inference_steps=50,
+                    num_inference_steps=30,  # 30 vs 60 default: ~2x faster, quality near identical
                 )
 
             # Extract audio array — result format may vary by ACE-Step version
