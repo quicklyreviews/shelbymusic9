@@ -24,9 +24,57 @@ import time
 # ============================================================
 # Container image — built once and cached by Modal
 # ============================================================
+# Minimal Node.js script that runs inside Modal to upload to Shelby.
+# Simpler than the Windows version — Linux DNS works fine, no patches needed.
+_SHELBY_UPLOAD_MJS = r"""
+import dns from 'dns'
+dns.setDefaultResultOrder('ipv4first')
+
+const jobId = process.argv[2]
+if (!jobId) { process.stderr.write('Usage: shelby-upload.mjs <jobId>\n'); process.exit(1) }
+
+const rawKey = (process.env.SHELBY_PRIVATE_KEY || '').replace(/^ed25519-priv-/, '')
+if (!rawKey) { process.stderr.write('SHELBY_PRIVATE_KEY not set\n'); process.exit(1) }
+
+const chunks = []
+for await (const chunk of process.stdin) chunks.push(chunk)
+const audioBuffer = Buffer.concat(chunks)
+
+const { Ed25519PrivateKey, Account } = await import('@aptos-labs/ts-sdk')
+const { ShelbyNodeClient } = await import('@shelby-protocol/sdk/node')
+
+const privateKey = new Ed25519PrivateKey(rawKey)
+const signer = Account.fromPrivateKey({ privateKey })
+const client = new ShelbyNodeClient({
+  network: process.env.SHELBY_NETWORK || 'testnet',
+  apiKey: process.env.SHELBY_API_KEY,
+})
+
+const blobName = `phonezoo/ringtones/ai-generated/${jobId}.mp3`
+const expirationDays = parseInt(process.env.SHELBY_EXPIRATION_DAYS || '30', 10)
+const expirationMicros = BigInt(Date.now() + expirationDays * 24 * 60 * 60 * 1000) * 1000n
+
+await client.upload({ signer, blobName, blobData: new Uint8Array(audioBuffer), expirationMicros })
+
+const network = process.env.SHELBY_NETWORK || 'testnet'
+const base = `https://api.${network}.shelby.xyz/shelby`
+const encodedName = blobName.split('/').map(encodeURIComponent).join('/')
+const url = `${base}/v1/blobs/${signer.accountAddress}/${encodedName}`
+process.stdout.write(JSON.stringify({ url, sizeKb: Math.round(audioBuffer.length / 1024) }))
+"""
+
 musicgen_image = (
     modal.Image.debian_slim(python_version="3.11")
-    .apt_install(["ffmpeg"])
+    .apt_install(["ffmpeg", "curl"])
+    .run_commands([
+        # Install Node.js 22 via NodeSource
+        "curl -fsSL https://deb.nodesource.com/setup_22.x | bash -",
+        "apt-get install -y nodejs",
+        # Install Shelby + Aptos SDK for Node.js
+        "mkdir -p /shelby-worker",
+        'echo \'{"type":"module"}\' > /shelby-worker/package.json',
+        "cd /shelby-worker && npm install @shelby-protocol/sdk @aptos-labs/ts-sdk",
+    ])
     .pip_install([
         "torch==2.6.0",          # 2.6+ required by transformers due to CVE-2025-32434 torch.load fix
         "transformers>=4.40.0",
@@ -157,18 +205,17 @@ class ACEStepGenerator:
             storage_provider = os.environ.get("STORAGE_PROVIDER", "r2").lower()
 
             if storage_provider == "shelby":
-                # Send MP3 as base64 inline — Node.js webhook uploads to Shelby (Node SDK handles on-chain registration)
-                import base64
-                audio_b64 = base64.b64encode(mp3_bytes).decode("ascii")
-                print(f"[MusicGen] Job {job_id} completed in {generation_time_ms}ms → {len(mp3_bytes)//1024}KB inline to webhook")
+                # Upload to Shelby directly from Modal (Node.js subprocess, 600s timeout, Linux DNS works fine)
+                audio_url = _upload_to_shelby_via_node(mp3_bytes, job_id)
+                print(f"[MusicGen] Job {job_id} completed in {generation_time_ms}ms → Shelby: {audio_url}")
                 _call_webhook(webhook_url, {
                     "job_id": job_id,
                     "status": "completed",
-                    "audio_data": audio_b64,
+                    "audio_url": audio_url,
                     "audio_size_kb": len(mp3_bytes) // 1024,
                     "generation_time_ms": generation_time_ms,
                 })
-                return {"status": "completed", "audio_url": None, "generation_time_ms": generation_time_ms}
+                return {"status": "completed", "audio_url": audio_url, "generation_time_ms": generation_time_ms}
             else:
                 audio_url = _upload_to_r2(mp3_bytes, job_id)
                 print(f"[MusicGen] Job {job_id} completed in {generation_time_ms}ms → {audio_url}")
@@ -231,6 +278,33 @@ def generate(payload: dict):
 # ============================================================
 # Storage helpers
 # ============================================================
+
+def _upload_to_shelby_via_node(mp3_bytes: bytes, job_id: str) -> str:
+    """Upload MP3 to Shelby testnet by running Node.js shelby-upload.mjs inside the Modal container."""
+    import subprocess
+    import json
+    import tempfile
+
+    # Write the upload script to the worker dir (once per container is fine)
+    script_path = "/shelby-worker/shelby-upload.mjs"
+    if not os.path.exists(script_path):
+        with open(script_path, "w") as f:
+            f.write(_SHELBY_UPLOAD_MJS)
+
+    result = subprocess.run(
+        ["node", "--dns-result-order=ipv4first", script_path, job_id],
+        input=mp3_bytes,
+        capture_output=True,
+        timeout=180,  # 3 min: blockchain registration ~10-30s + upload
+    )
+
+    if result.returncode != 0:
+        stderr = result.stderr.decode(errors="replace")[:500]
+        raise RuntimeError(f"shelby-upload.mjs failed (exit {result.returncode}): {stderr}")
+
+    data = json.loads(result.stdout.decode())
+    return data["url"]
+
 
 def _upload_to_r2(mp3_bytes: bytes, job_id: str) -> str:
     """Upload MP3 to Cloudflare R2, return public URL."""
