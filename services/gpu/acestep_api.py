@@ -28,7 +28,7 @@ musicgen_image = (
     modal.Image.debian_slim(python_version="3.11")
     .apt_install(["ffmpeg"])
     .pip_install([
-        "torch==2.2.0",
+        "torch==2.6.0",          # 2.6+ required by transformers due to CVE-2025-32434 torch.load fix
         "transformers>=4.40.0",
         "accelerate>=0.28.0",
         "pydub>=0.25.1",
@@ -53,7 +53,7 @@ app = modal.App("phonezoo-acestep")
     secrets=[modal.Secret.from_name("phonezoo-secrets")],
     volumes={"/model-cache": model_volume},
     scaledown_window=120,  # Keep warm for 2 min after last request
-    timeout=300,           # 5 min: cold start model download (~3GB) + generation
+    timeout=600,           # 10 min: cold start model download (~3GB first time) + generation
 )
 class ACEStepGenerator:
 
@@ -130,8 +130,7 @@ class ACEStepGenerator:
 
             print(f"[MusicGen] Generated {len(audio_np)} samples at {self.sample_rate}Hz ({len(audio_np)/self.sample_rate:.1f}s)")
 
-            # Encode to MP3 via WAV intermediate + pydub
-            import soundfile as sf
+            # Encode to MP3 via pydub (no soundfile needed)
             from pydub import AudioSegment
 
             # Normalize to int16
@@ -139,41 +138,48 @@ class ACEStepGenerator:
             if audio_np.dtype != np.int16:
                 audio_np = (audio_np / max(np.abs(audio_np).max(), 1e-8) * 32767).astype(np.int16)
 
-            # Write to WAV buffer
-            wav_buf = io.BytesIO()
-            sf.write(wav_buf, audio_np, self.sample_rate, format="WAV", subtype="PCM_16")
-            wav_buf.seek(0)
+            # Build AudioSegment directly from raw PCM bytes
+            audio_segment = AudioSegment(
+                audio_np.tobytes(),
+                frame_rate=self.sample_rate,
+                sample_width=2,   # 16-bit PCM = 2 bytes
+                channels=1,
+            )
 
-            # Convert WAV → MP3 (192kbps) via pydub
-            audio_segment = AudioSegment.from_wav(wav_buf)
+            # Export to MP3 (192kbps)
             mp3_buf = io.BytesIO()
             audio_segment.export(mp3_buf, format="mp3", bitrate="192k")
             mp3_bytes = mp3_buf.getvalue()
 
             print(f"[MusicGen] Encoded MP3: {len(mp3_bytes) // 1024}KB")
 
-            # Upload to storage (Shelby testnet OR Cloudflare R2)
+            generation_time_ms = int(time.time() * 1000) - start_ms
             storage_provider = os.environ.get("STORAGE_PROVIDER", "r2").lower()
 
             if storage_provider == "shelby":
-                audio_url = _upload_to_shelby(mp3_bytes, job_id)
+                # Send MP3 as base64 inline — Node.js webhook uploads to Shelby (Node SDK handles on-chain registration)
+                import base64
+                audio_b64 = base64.b64encode(mp3_bytes).decode("ascii")
+                print(f"[MusicGen] Job {job_id} completed in {generation_time_ms}ms → {len(mp3_bytes)//1024}KB inline to webhook")
+                _call_webhook(webhook_url, {
+                    "job_id": job_id,
+                    "status": "completed",
+                    "audio_data": audio_b64,
+                    "audio_size_kb": len(mp3_bytes) // 1024,
+                    "generation_time_ms": generation_time_ms,
+                })
+                return {"status": "completed", "audio_url": None, "generation_time_ms": generation_time_ms}
             else:
                 audio_url = _upload_to_r2(mp3_bytes, job_id)
-
-            generation_time_ms = int(time.time() * 1000) - start_ms
-
-            print(f"[MusicGen] Job {job_id} completed in {generation_time_ms}ms → {audio_url}")
-
-            # Notify webhook
-            _call_webhook(webhook_url, {
-                "job_id": job_id,
-                "status": "completed",
-                "audio_url": audio_url,
-                "audio_size_kb": len(mp3_bytes) // 1024,
-                "generation_time_ms": generation_time_ms,
-            })
-
-            return {"status": "completed", "audio_url": audio_url, "generation_time_ms": generation_time_ms}
+                print(f"[MusicGen] Job {job_id} completed in {generation_time_ms}ms → {audio_url}")
+                _call_webhook(webhook_url, {
+                    "job_id": job_id,
+                    "status": "completed",
+                    "audio_url": audio_url,
+                    "audio_size_kb": len(mp3_bytes) // 1024,
+                    "generation_time_ms": generation_time_ms,
+                })
+                return {"status": "completed", "audio_url": audio_url, "generation_time_ms": generation_time_ms}
 
         except Exception as exc:
             import traceback

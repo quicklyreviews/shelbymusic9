@@ -26,7 +26,7 @@ export default async function HomePage() {
       <section className="text-center space-y-6 py-8">
         <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-brand-orange/10 border border-brand-orange/20 text-brand-orange text-sm font-medium mb-2">
           <Zap size={14} />
-          Powered by ACE-Step 1.5 AI
+          Powered by MusicGen AI
         </div>
         <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold text-brand-white leading-tight">
           Create AI Ringtones

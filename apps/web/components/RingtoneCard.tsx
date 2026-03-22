@@ -53,6 +53,24 @@ export function RingtoneCard({ ringtone }: RingtoneCardProps) {
         {formatDuration(ringtone.duration_seconds)} · {timeAgo(ringtone.created_at)}
       </p>
 
+      {/* Storage badge */}
+      {ringtone.audio_url && (
+        <a
+          href={`/preview?url=${encodeURIComponent(ringtone.audio_url)}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-1 text-xs text-brand-text hover:text-brand-orange transition-colors mb-3"
+        >
+          {ringtone.audio_url.includes('shelby.xyz') ? (
+            <><span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block flex-shrink-0" /> Shelby testnet</>
+          ) : ringtone.audio_url.includes('r2.dev') ? (
+            <><span className="w-1.5 h-1.5 rounded-full bg-yellow-400 inline-block flex-shrink-0" /> Cloudflare R2</>
+          ) : (
+            <><span className="w-1.5 h-1.5 rounded-full bg-brand-text inline-block flex-shrink-0" /> Audio</>
+          )}
+        </a>
+      )}
+
       {/* Actions */}
       <div className="flex items-center gap-2">
         <button

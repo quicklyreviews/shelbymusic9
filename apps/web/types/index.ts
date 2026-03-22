@@ -61,6 +61,7 @@ export interface WebhookPayload {
   job_id: string
   status: 'completed' | 'failed'
   audio_url?: string
+  audio_data?: string        // base64 MP3 when STORAGE_PROVIDER=shelby
   audio_size_kb?: number
   generation_time_ms?: number
   error?: string

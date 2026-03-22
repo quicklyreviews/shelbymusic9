@@ -42,7 +42,9 @@ const nextConfig = {
   },
 
   experimental: {
-    serverComponentsExternalPackages: ['better-sqlite3'],
+    serverComponentsExternalPackages: [
+      'better-sqlite3',
+    ],
   },
 
   webpack: (config, { isServer }) => {

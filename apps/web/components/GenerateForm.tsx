@@ -5,7 +5,7 @@ import { GenreSelector } from '@/components/GenreSelector'
 import { Button } from '@/components/ui/Button'
 import { GenerationStatus } from '@/components/GenerationStatus'
 import { useGenerateMusic } from '@/hooks/useGenerateMusic'
-import { ChevronDown, ChevronUp, Wand2, Plus } from 'lucide-react'
+import { ChevronDown, ChevronUp, Wand2, Plus, Sparkles } from 'lucide-react'
 import type { Genre } from '@/types'
 
 interface GenerateFormProps {
@@ -23,6 +23,8 @@ export function GenerateForm({ genres, defaultGenre = 'pop', defaultPrompt = '' 
   const [duration, setDuration] = useState<30 | 15 | 60>(30)
   const [showLyrics, setShowLyrics] = useState(false)
   const [validationError, setValidationError] = useState('')
+  const [isAiWriting, setIsAiWriting] = useState(false)
+  const [aiError, setAiError] = useState('')
 
   const { generate, reset, status, audioUrl, isSubmitting, error, elapsedMs } = useGenerateMusic()
 
@@ -54,6 +56,33 @@ export function GenerateForm({ genres, defaultGenre = 'pop', defaultPrompt = '' 
     })
   }
 
+  const writeWithAI = async () => {
+    if (!prompt.trim() || isAiWriting || isDisabled) return
+    setIsAiWriting(true)
+    setAiError('')
+    try {
+      const res = await fetch('/api/ai-prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          description: prompt.trim(),
+          genre: selectedGenre,
+          lyrics: lyrics.trim(),
+        }),
+      })
+      const data = await res.json()
+      if (data.prompt) {
+        setPrompt(data.prompt)
+      } else {
+        setAiError('AI could not generate a prompt. Try again.')
+      }
+    } catch {
+      setAiError('Connection error. Try again.')
+    } finally {
+      setIsAiWriting(false)
+    }
+  }
+
   return (
     <div className="space-y-6">
       {/* Form always visible — dims + locks during generation */}
@@ -69,20 +98,33 @@ export function GenerateForm({ genres, defaultGenre = 'pop', defaultPrompt = '' 
 
         {/* Prompt */}
         <div className="space-y-1.5">
-          <label htmlFor="prompt" className="text-sm font-medium text-brand-white">
-            Describe your ringtone
-          </label>
+          <div className="flex items-center justify-between">
+            <label htmlFor="prompt" className="text-sm font-medium text-brand-white">
+              Describe your ringtone
+            </label>
+            <button
+              type="button"
+              onClick={writeWithAI}
+              disabled={isDisabled || isAiWriting || !prompt.trim()}
+              title="Let AI rewrite this as a professional music prompt"
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-brand-orange/10 border border-brand-orange/30 text-brand-orange hover:bg-brand-orange hover:text-white transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <Sparkles size={11} className={isAiWriting ? 'animate-pulse' : ''} />
+              {isAiWriting ? 'Writing...' : 'AI Write'}
+            </button>
+          </div>
           <textarea
             id="prompt"
             value={prompt}
             onChange={e => setPrompt(e.target.value)}
-            disabled={isDisabled}
-            placeholder="e.g. upbeat pop melody with catchy hook, bright and energetic..."
+            disabled={isDisabled || isAiWriting}
+            placeholder="Type your idea in any language — e.g. 'nhạc buồn nhớ người yêu' or 'upbeat summer party'"
             maxLength={500}
             rows={3}
             className="w-full px-3 py-2.5 rounded-lg bg-bg-panel border border-bg-border text-brand-white placeholder-brand-text text-sm focus:outline-none focus:ring-2 focus:ring-brand-orange/50 focus:border-brand-orange transition-colors resize-none disabled:cursor-not-allowed"
           />
           {validationError && <p className="text-xs text-red-400">{validationError}</p>}
+          {aiError && <p className="text-xs text-red-400">{aiError}</p>}
           <p className="text-xs text-brand-text text-right">{prompt.length}/500</p>
         </div>
 

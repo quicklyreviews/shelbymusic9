@@ -1,6 +1,8 @@
 import type { Metadata } from 'next'
 import { getSupabaseAdminClient } from '@/lib/supabase'
+import { getRecentRingtones } from '@/lib/storage'
 import { GenerateForm } from '@/components/GenerateForm'
+import { RingtoneCard } from '@/components/RingtoneCard'
 import type { Genre } from '@/types'
 
 export const metadata: Metadata = {
@@ -23,7 +25,11 @@ interface GeneratePageProps {
 }
 
 export default async function GeneratePage({ searchParams }: GeneratePageProps) {
-  const genres = await getGenres()
+  const [genres, recentRingtones] = await Promise.all([
+    getGenres(),
+    getRecentRingtones(6),
+  ])
+
   const defaultGenre = searchParams.genre && genres.some(g => g.id === searchParams.genre)
     ? searchParams.genre
     : 'pop'
@@ -54,6 +60,18 @@ export default async function GeneratePage({ searchParams }: GeneratePageProps) 
           <li>First generation takes ~90 seconds (GPU warm-up). Subsequent ones are faster.</li>
         </ul>
       </div>
+
+      {/* Recently created */}
+      {recentRingtones.length > 0 && (
+        <div className="mt-12">
+          <h2 className="text-lg font-semibold text-brand-white mb-4">Recently Created</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {recentRingtones.map(ringtone => (
+              <RingtoneCard key={ringtone.id} ringtone={ringtone} />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -73,11 +73,29 @@ export async function POST(req: NextRequest) {
       webhook_url: buildWebhookUrl(appUrl, jobId),
     }
 
-    fetch(modalEndpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(modalPayload),
-    }).catch(err => console.error('Modal dispatch failed:', err))
+    // Fire-and-forget with 3 retries — auto-fail job if all attempts fail
+    ;(async () => {
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const res = await fetch(modalEndpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(modalPayload),
+            signal: AbortSignal.timeout(15_000),
+          })
+          if (res.ok) {
+            console.log(`[generate] Modal dispatch ok (attempt ${attempt})`)
+            return
+          }
+          console.error(`[generate] Modal returned ${res.status} (attempt ${attempt})`)
+        } catch (err) {
+          console.error(`[generate] Modal dispatch attempt ${attempt} failed:`, (err as Error).message)
+        }
+        if (attempt < 3) await new Promise(r => setTimeout(r, 1500 * attempt))
+      }
+      console.error(`[generate] All retries failed for job ${jobId}, marking failed`)
+      await markJobFailed(jobId)
+    })()
 
     return NextResponse.json({ job_id: jobId, status: 'processing' })
   } catch (err) {
