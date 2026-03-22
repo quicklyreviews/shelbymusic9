@@ -137,7 +137,7 @@ export function GenerateForm({ genres, defaultGenre = 'pop', defaultPrompt = '' 
                 key={d}
                 type="button"
                 disabled={isDisabled}
-                onClick={() => setDuration(d as 15 | 30 | 60)}
+                onClick={() => setDuration(d as 15 | 30)}
                 className={`flex-1 py-2.5 rounded-lg text-sm font-medium border transition-all duration-150 disabled:cursor-not-allowed ${
                   duration === d
                     ? 'bg-brand-orange border-brand-orange text-white'
