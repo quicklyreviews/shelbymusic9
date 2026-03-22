@@ -54,7 +54,21 @@ const blobName = `phonezoo/ringtones/ai-generated/${jobId}.mp3`
 const expirationDays = parseInt(process.env.SHELBY_EXPIRATION_DAYS || '30', 10)
 const expirationMicros = BigInt(Date.now() + expirationDays * 24 * 60 * 60 * 1000) * 1000n
 
-await client.upload({ signer, blobName, blobData: new Uint8Array(audioBuffer), expirationMicros })
+// Retry up to 3x with 5s delay — Shelby HTTP upload can fail if blockchain
+// transaction hasn't propagated to CDN nodes yet (race condition).
+let lastErr
+for (let attempt = 1; attempt <= 3; attempt++) {
+  try {
+    await client.upload({ signer, blobName, blobData: new Uint8Array(audioBuffer), expirationMicros })
+    lastErr = null
+    break
+  } catch (e) {
+    lastErr = e
+    process.stderr.write(`[Shelby] Attempt ${attempt} failed: ${e.message}\n`)
+    if (attempt < 3) await new Promise(r => setTimeout(r, 5000))
+  }
+}
+if (lastErr) throw lastErr
 
 const network = process.env.SHELBY_NETWORK || 'testnet'
 const base = `https://api.${network}.shelby.xyz/shelby`
