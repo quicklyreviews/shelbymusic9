@@ -205,9 +205,15 @@ class ACEStepGenerator:
             storage_provider = os.environ.get("STORAGE_PROVIDER", "r2").lower()
 
             if storage_provider == "shelby":
-                # Upload to Shelby directly from Modal (Node.js subprocess, 600s timeout, Linux DNS works fine)
-                audio_url = _upload_to_shelby_via_node(mp3_bytes, job_id)
-                print(f"[MusicGen] Job {job_id} completed in {generation_time_ms}ms → Shelby: {audio_url}")
+                # Upload to Shelby via Node.js subprocess (Linux, 180s timeout, full SDK + blockchain)
+                # Falls back to R2 if Shelby is down or account has insufficient balance
+                try:
+                    audio_url = _upload_to_shelby_via_node(mp3_bytes, job_id)
+                    print(f"[MusicGen] Job {job_id} completed in {generation_time_ms}ms → Shelby: {audio_url}")
+                except Exception as shelby_err:
+                    print(f"[MusicGen] Shelby upload failed, falling back to R2: {shelby_err}")
+                    audio_url = _upload_to_r2(mp3_bytes, job_id)
+                    print(f"[MusicGen] Fallback R2: {audio_url}")
                 _call_webhook(webhook_url, {
                     "job_id": job_id,
                     "status": "completed",
