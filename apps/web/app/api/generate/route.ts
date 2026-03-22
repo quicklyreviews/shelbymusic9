@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
-import { getGenreTemplate, createRingtone } from '@/lib/storage'
+import { getGenreTemplate, createRingtone, markJobFailed } from '@/lib/storage'
 import { generateSeed, buildWebhookUrl } from '@/lib/utils'
 import type { ModalPayload } from '@/types'
 
