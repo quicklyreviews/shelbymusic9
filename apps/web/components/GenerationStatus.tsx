@@ -33,6 +33,19 @@ export function GenerationStatus({ status, audioUrl, elapsedMs, error, onReset }
   const phaseIdx = Math.min(PHASE_LABELS.length - 1, Math.floor((progress / 95) * PHASE_LABELS.length))
   const elapsedSec = Math.floor(elapsedMs / 1000)
 
+  if (status === 'completed' && !audioUrl) {
+    return (
+      <div className="animate-fade-in space-y-3">
+        <div className="flex items-center gap-2 text-yellow-400">
+          <CheckCircle size={20} />
+          <span className="font-semibold">Generation complete</span>
+        </div>
+        <p className="text-brand-text text-sm">Audio is processing. Refresh if it doesn&apos;t appear shortly.</p>
+        <Button variant="primary" onClick={onReset}>Try Again</Button>
+      </div>
+    )
+  }
+
   if (status === 'completed' && audioUrl) {
     return (
       <div className="animate-slide-up space-y-4">

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getJobStatus, markJobFailed } from '@/lib/storage'
 
+export const dynamic = 'force-dynamic'
+
 const STALE_JOB_TIMEOUT_MS = 10 * 60 * 1000 // 10 min: matches Modal timeout
 
 export async function GET(

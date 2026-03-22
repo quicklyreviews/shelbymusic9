@@ -118,12 +118,13 @@ export async function completeJob(
 ): Promise<void> {
   if (useSupabase()) {
     const { getSupabaseAdminClient } = await import('./supabase')
-    await getSupabaseAdminClient().from('ai_ringtones').update({
+    const { error } = await getSupabaseAdminClient().from('ai_ringtones').update({
       status: 'completed',
       audio_url: result.audio_url,
       audio_size_kb: result.audio_size_kb ?? null,
       generation_time_ms: result.generation_time_ms ?? null,
     }).eq('id', jobId)
+    if (error) throw new Error(`completeJob failed: ${error.message}`)
     return
   }
   sqliteDb().db.prepare(`

@@ -23,7 +23,7 @@ export async function submitGeneration(request: GenerateRequest): Promise<Genera
  * Poll the status of a generation job.
  */
 export async function pollStatus(jobId: string): Promise<StatusResponse> {
-  const res = await fetch(`/api/status/${jobId}`, { cache: 'no-store' })
+  const res = await fetch(`/api/status/${jobId}?_t=${Date.now()}`, { cache: 'no-store' })
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
