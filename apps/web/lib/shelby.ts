@@ -207,3 +207,49 @@ export function isShelbyConfigured(): boolean {
     process.env.SHELBY_ACCOUNT_ADDRESS
   )
 }
+
+/**
+ * Fetch the latest blobs for the configured account from the Shelby Indexer.
+ */
+export async function getLatestShelbyBlobs(limit = 10): Promise<any[]> {
+  const account = process.env.SHELBY_ACCOUNT_ADDRESS
+  if (!account) return []
+
+  const network = process.env.SHELBY_NETWORK || 'testnet'
+  // URL indexer from Shelby SDK
+  const indexerUrl = network === 'shelbynet'
+    ? 'https://api.shelbynet.aptoslabs.com/nocode/v1/public/cmforrguw0042s601fn71f9l2/v1/graphql'
+    : 'https://api.testnet.aptoslabs.com/nocode/v1/public/cmlfqs5wt00qrs601zt5s4kfj/v1/graphql'
+
+  const query = `
+    query GetBlobs($account: String!, $limit: Int!) {
+      Blobs(
+        where: { account: { _eq: $account } }
+        order_by: { created_at: desc }
+        limit: $limit
+      ) {
+        id
+        blob_name
+        created_at
+      }
+    }
+  `
+
+  try {
+    const res = await fetch(indexerUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query,
+        variables: { account, limit }
+      })
+    })
+
+    if (!res.ok) return []
+    const { data } = await res.json()
+    return data?.Blobs || []
+  } catch (err) {
+    console.error('[shelby] Failed to fetch latest blobs:', err)
+    return []
+  }
+}

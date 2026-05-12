@@ -146,6 +146,33 @@ export async function getRecentRingtones(limit = 6): Promise<Ringtone[]> {
     return (data as Ringtone[]) || []
   }
   const { db, rowToRingtone } = sqliteDb()
+  
+  // Shelby Sync: Check if we should sync latest blobs from Shelby
+  if (process.env.STORAGE_PROVIDER === 'shelby') {
+    try {
+      const { getLatestShelbyBlobs, getShelbyPublicUrl } = await import('./shelby')
+      const latestBlobs = await getLatestShelbyBlobs(10)
+      
+      for (const blob of latestBlobs) {
+        // Extract jobId from blob_name: phonezoo/ringtones/ai-generated/{jobId}.mp3
+        const match = blob.blob_name.match(/([^/]+)\.mp3$/)
+        if (match) {
+          const jobId = match[1]
+          const audioUrl = getShelbyPublicUrl(blob.blob_name)
+          
+          // Update DB if job is still 'processing' or has no audio_url
+          db.prepare(`
+            UPDATE ai_ringtones 
+            SET status = 'completed', audio_url = ? 
+            WHERE id = ? AND (status = 'processing' OR audio_url IS NULL OR audio_url = '')
+          `).run(audioUrl, jobId)
+        }
+      }
+    } catch (err) {
+      console.error('[storage] Shelby sync failed:', err)
+    }
+  }
+
   return (db.prepare(
     `SELECT * FROM ai_ringtones WHERE status = 'completed' AND is_public = 1 ORDER BY created_at DESC LIMIT ?`
   ).all(limit) as Record<string, unknown>[]).map(rowToRingtone)
